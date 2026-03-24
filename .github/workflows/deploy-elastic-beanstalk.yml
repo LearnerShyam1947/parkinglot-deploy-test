@@ -1,0 +1,188 @@
+# Zip the full repository (minus bulky paths) and deploy to AWS Elastic Beanstalk.
+#
+# Marketplace actions:
+#   - aws-actions/configure-aws-credentials
+#   - TheDoctor0/zip-release — archive the project with exclusions
+#   - einaregilsson/beanstalk-deploy — upload to S3, create version, deploy, wait
+#
+# Secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
+# Variables: EB_APPLICATION_NAME, EB_ENVIRONMENT_NAME
+# Optional vars: AWS_REGION, EB_SOLUTION_STACK, EB_EC2_INSTANCE_PROFILE, EB_SERVICE_ROLE_NAME
+
+name: Deploy to Elastic Beanstalk
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      EB_EC2_INSTANCE_PROFILE: ${{ vars.EB_EC2_INSTANCE_PROFILE }}
+      EB_SERVICE_ROLE_NAME: ${{ vars.EB_SERVICE_ROLE_NAME }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          if [ -z "${{ vars.EB_APPLICATION_NAME }}" ] || [ -z "${{ vars.EB_ENVIRONMENT_NAME }}" ]; then
+            echo "Set repository variables EB_APPLICATION_NAME and EB_ENVIRONMENT_NAME."
+            exit 1
+          fi
+
+      - name: Version label
+        run: |
+          echo "VERSION_LABEL=deploy-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Zip project for Elastic Beanstalk
+        uses: TheDoctor0/zip-release@0.7.6
+        with:
+          filename: deploy.zip
+          path: .
+          type: zip
+          custom: "-x '*.git/*' -x '.git/*' -x '*node_modules/*' -x 'deploy.zip' -x '*.zip' -x '*.env' -x 'backend/.env' -x '*.db' -x '*.db-wal' -x '*.db-shm' -x '.DS_Store' -x '*/.DS_Store'"
+
+      - name: Ensure Elastic Beanstalk application exists
+        run: |
+          set -euo pipefail
+          APP="${{ vars.EB_APPLICATION_NAME }}"
+          N=$(aws elasticbeanstalk describe-applications --application-names "$APP" --query 'length(Applications)' --output text)
+          if [ "$N" = "0" ]; then
+            aws elasticbeanstalk create-application --application-name "$APP" --description "Deployed from GitHub Actions"
+          fi
+
+      - name: Check if environment exists
+        id: eb_env
+        run: |
+          COUNT=$(aws elasticbeanstalk describe-environments \
+            --application-name "${{ vars.EB_APPLICATION_NAME }}" \
+            --environment-names "${{ vars.EB_ENVIRONMENT_NAME }}" \
+            --query 'length(Environments)' --output text)
+          if [ "$COUNT" = "0" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve Node.js solution stack (first deploy only)
+        if: steps.eb_secrets.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          if [ -n "${{ vars.EB_SOLUTION_STACK }}" ]; then
+            echo "EB_SOLUTION_STACK=${{ vars.EB_SOLUTION_STACK }}" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          STACK=$(aws elasticbeanstalk list-available-solution-stacks --output json | \
+            jq -r '[.SolutionStacks[] | select(test("Amazon Linux 2023") and test("Node.js"))] | sort | reverse | .[0]')
+          if [ -z "$STACK" ] || [ "$STACK" = "null" ]; then
+            echo "Set variable EB_SOLUTION_STACK to a full solution stack name from list-available-solution-stacks."
+            exit 1
+          fi
+          echo "Using solution stack: $STACK"
+          echo "EB_SOLUTION_STACK=$STACK" >> "$GITHUB_ENV"
+
+      - name: Upload bundle and register application version (first deploy only)
+        if: steps.eb_secrets.outputs.exists == 'false'
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: ${{ secrets.AWS_REGION }}
+          application_name: ${{ vars.EB_APPLICATION_NAME }}
+          environment_name: ""
+          version_label: ${{ secrets.VERSION_LABEL }}
+          version_description: ${{ github.sha }}
+          deployment_package: deploy.zip
+          wait_for_deployment: "false"
+
+      - name: Create Elastic Beanstalk environment (first deploy only)
+        if: steps.eb_secrets.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          APP="${{ vars.EB_APPLICATION_NAME }}"
+          ENV_NAME="${{ vars.EB_ENVIRONMENT_NAME }}"
+          PROFILE="${EB_EC2_INSTANCE_PROFILE:-aws-elasticbeanstalk-ec2-role}"
+          ROLE_NAME="${EB_SERVICE_ROLE_NAME:-aws-elasticbeanstalk-service-role}"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          SERVICE_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
+          jq -n \
+            --arg profile "$PROFILE" \
+            --arg role "$SERVICE_ROLE_ARN" \
+            '[{"Namespace":"aws:autoscaling:launchconfiguration","OptionName":"IamInstanceProfile","Value":$profile},{"Namespace":"aws:elasticbeanstalk:environment","OptionName":"ServiceRole","Value":$role}]' \
+            > /tmp/eb-create-opts.json
+          echo "Creating environment (often 10–20 minutes the first time)..."
+          aws elasticbeanstalk create-environment \
+            --application-name "$APP" \
+            --environment-name "$ENV_NAME" \
+            --version-label "$VERSION_LABEL" \
+            --solution-stack-name "$EB_SOLUTION_STACK" \
+            --tier Name=WebServer,Type=Standard,Version=1 \
+            --option-settings file:///tmp/eb-create-opts.json
+
+      - name: Wait for new environment (first deploy only)
+        if: steps.eb_secrets.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          ENV_NAME="${{ vars.EB_ENVIRONMENT_NAME }}"
+          for i in $(seq 1 120); do
+            STATUS=$(aws elasticbeanstalk describe-environments \
+              --environment-names "$ENV_NAME" \
+              --query 'Environments[0].Status' --output text)
+            HEALTH=$(aws elasticbeanstalk describe-environments \
+              --environment-names "$ENV_NAME" \
+              --query 'Environments[0].HealthStatus' --output text)
+            echo "  [$i] Status=$STATUS Health=$HEALTH"
+            if [ "$STATUS" = "None" ] || [ -z "$STATUS" ]; then sleep 15; continue; fi
+            if [ "$STATUS" = "Ready" ]; then
+              if [ "$HEALTH" = "Green" ] || [ "$HEALTH" = "Yellow" ]; then
+                echo "Environment is ready."
+                exit 0
+              fi
+              if [ "$HEALTH" = "Red" ]; then
+                echo "Health is Red — check Elastic Beanstalk logs."
+                exit 1
+              fi
+            fi
+            if [ "$STATUS" = "Terminated" ] || [ "$STATUS" = "Terminating" ]; then exit 1; fi
+            sleep 15
+          done
+          echo "Timed out waiting for environment."
+          exit 1
+
+      - name: Deploy to Elastic Beanstalk
+        if: steps.eb_secrets.outputs.exists == 'true'
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: ${{ secrets.AWS_REGION }}
+          application_name: ${{ vars.EB_APPLICATION_NAME }}
+          environment_name: ${{ vars.EB_ENVIRONMENT_NAME }}
+          version_label: ${{ secrets.VERSION_LABEL }}
+          version_description: ${{ github.sha }}
+          deployment_package: deploy.zip
+          wait_for_deployment: "true"
+          wait_for_environment_recovery: 120
+
+      - name: Environment URL
+        if: always() && steps.eb_secrets.outcome == 'success'
+        run: |
+          aws elasticbeanstalk describe-environments \
+            --environment-names "${{ vars.EB_ENVIRONMENT_NAME }}" \
+            --query 'Environments[0].CNAME' --output text 2>/dev/null || true

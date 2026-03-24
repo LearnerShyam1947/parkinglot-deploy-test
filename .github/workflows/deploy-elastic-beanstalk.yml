@@ -132,7 +132,6 @@ jobs:
             --environment-name "$ENV_NAME" \
             --version-label "$VERSION_LABEL" \
             --solution-stack-name "$EB_SOLUTION_STACK" \
-            --tier Name=WebServer,Type=Standard,Version=1 \
             --option-settings file:///tmp/eb-create-opts.json
 
       - name: Wait for new environment (first deploy only)

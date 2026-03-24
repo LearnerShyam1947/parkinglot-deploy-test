@@ -106,7 +106,7 @@ jobs:
           region: ${{ secrets.AWS_REGION }}
           application_name: ${{ vars.EB_APPLICATION_NAME }}
           environment_name: ""
-          ${{ env.VERSION_LABEL }}
+          version_label: ${{ env.VERSION_LABEL }}
           version_description: ${{ github.sha }}
           deployment_package: deploy.zip
           wait_for_deployment: "false"
@@ -174,7 +174,7 @@ jobs:
           region: ${{ secrets.AWS_REGION }}
           application_name: ${{ vars.EB_APPLICATION_NAME }}
           environment_name: ${{ vars.EB_ENVIRONMENT_NAME }}
-          ${{ env.VERSION_LABEL }}
+          version_label: ${{ env.VERSION_LABEL }}
           version_description: ${{ github.sha }}
           deployment_package: deploy.zip
           wait_for_deployment: "true"

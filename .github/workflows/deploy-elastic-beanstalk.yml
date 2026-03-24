@@ -152,31 +152,50 @@ jobs:
         run: |
           set -euo pipefail
           ENV_NAME="${{ vars.EB_ENVIRONMENT_NAME }}"
+
           for i in $(seq 1 120); do
             STATUS=$(aws elasticbeanstalk describe-environments \
               --environment-names "$ENV_NAME" \
               --query 'Environments[0].Status' --output text)
+
             HEALTH=$(aws elasticbeanstalk describe-environments \
               --environment-names "$ENV_NAME" \
               --query 'Environments[0].HealthStatus' --output text)
+
             echo "  [$i] Status=$STATUS Health=$HEALTH"
-            if [ "$STATUS" = "None" ] || [ -z "$STATUS" ]; then sleep 15; continue; fi
+
+            # If not yet created properly
+            if [ "$STATUS" = "None" ] || [ -z "$STATUS" ]; then
+              sleep 15
+              continue
+            fi
+
+            # ✅ SUCCESS CONDITION (FIXED)
             if [ "$STATUS" = "Ready" ]; then
-              if [ "$HEALTH" = "Green" ] || [ "$HEALTH" = "Yellow" ]; then
+              if [ "$HEALTH" = "Ok" ] || [ "$HEALTH" = "Warning" ]; then
                 echo "Environment is ready."
                 exit 0
               fi
-              if [ "$HEALTH" = "Red" ]; then
-                echo "Health is Red — check Elastic Beanstalk logs."
+
+              # ❌ FAILURE CONDITION
+              if [ "$HEALTH" = "Severe" ]; then
+                echo "Health is Severe — check Elastic Beanstalk logs."
                 exit 1
               fi
             fi
-            if [ "$STATUS" = "Terminated" ] || [ "$STATUS" = "Terminating" ]; then exit 1; fi
+
+            # ❌ TERMINATED
+            if [ "$STATUS" = "Terminated" ] || [ "$STATUS" = "Terminating" ]; then
+              echo "Environment terminated unexpectedly."
+              exit 1
+            fi
+
             sleep 15
           done
+
           echo "Timed out waiting for environment."
           exit 1
-
+          
       - name: Deploy to Elastic Beanstalk
         if: steps.eb_env.outputs.exists == 'true'
         uses: einaregilsson/beanstalk-deploy@v22

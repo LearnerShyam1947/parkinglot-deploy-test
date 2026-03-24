@@ -111,18 +111,6 @@ jobs:
           deployment_package: deploy.zip
           wait_for_deployment: "false"
           
-      - name: Set Elastic Beanstalk environment variables
-        run: |
-          aws elasticbeanstalk update-environment \
-            --application-name "${{ vars.EB_APPLICATION_NAME }}" \
-            --environment-name "${{ vars.EB_ENVIRONMENT_NAME }}" \
-            --option-settings \
-              Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_ACCESS_KEY_ID,Value=${{ secrets.AWS_ACCESS_KEY_ID }} \
-              Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_SECRET_ACCESS_KEY,Value=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
-              Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_REGION,Value=${{ vars.AWS_REGION }} \
-              Namespace=aws:elasticbeanstalk:application:environment,OptionName=SQS_QUEUE_URL,Value=${{ secrets.SQS_QUEUE_URL }} \
-              Namespace=aws:elasticbeanstalk:application:environment,OptionName=POLL_INTERVAL,Value=${{ vars.POLL_INTERVAL }}
-
       - name: Create Elastic Beanstalk environment (first deploy only)
         if: steps.eb_env.outputs.exists == 'false'
         run: |
@@ -134,10 +122,23 @@ jobs:
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           SERVICE_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${ROLE_NAME}"
           jq -n \
-            --arg profile "$PROFILE" \
-            --arg role "$SERVICE_ROLE_ARN" \
-            '[{"Namespace":"aws:autoscaling:launchconfiguration","OptionName":"IamInstanceProfile","Value":$profile},{"Namespace":"aws:elasticbeanstalk:environment","OptionName":"ServiceRole","Value":$role}]' \
-            > /tmp/eb-create-opts.json
+          --arg profile "$PROFILE" \
+          --arg role "$SERVICE_ROLE_ARN" \
+          --arg aws_key "${{ secrets.AWS_ACCESS_KEY_ID }}" \
+          --arg aws_secret "${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+          --arg region "${{ vars.AWS_REGION }}" \
+          --arg sqs "${{ secrets.SQS_QUEUE_URL }}" \
+          --arg poll "${{ vars.POLL_INTERVAL }}"
+          '[ 
+            {"Namespace":"aws:autoscaling:launchconfiguration","OptionName":"IamInstanceProfile","Value":$profile},
+            {"Namespace":"aws:elasticbeanstalk:environment","OptionName":"ServiceRole","Value":$role},
+            {"Namespace":"aws:elasticbeanstalk:application:environment","OptionName":"AWS_ACCESS_KEY_ID","Value":$aws_key},
+            {"Namespace":"aws:elasticbeanstalk:application:environment","OptionName":"AWS_SECRET_ACCESS_KEY","Value":$aws_secret},
+            {"Namespace":"aws:elasticbeanstalk:application:environment","OptionName":"AWS_REGION","Value":$region},
+            {"Namespace":"aws:elasticbeanstalk:application:environment","OptionName":"SQS_QUEUE_URL","Value":$sqs},
+            {"Namespace":"aws:elasticbeanstalk:application:environment","OptionName":"POLL_INTERVAL","Value":$poll}
+          ]' \
+          > /tmp/eb-create-opts.json
           echo "Creating environment (often 10–20 minutes the first time)..."
           aws elasticbeanstalk create-environment \
             --application-name "$APP" \
@@ -192,7 +193,7 @@ jobs:
           wait_for_environment_recovery: 120
 
       - name: Environment URL
-        if: always() && steps.eb_secrets.outcome == 'success'
+        if: always() && steps.eb_env.outcome == 'success'
         run: |
           aws elasticbeanstalk describe-environments \
             --environment-names "${{ vars.EB_ENVIRONMENT_NAME }}" \

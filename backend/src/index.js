@@ -65,7 +65,7 @@ app.get('/api/events/nearby', (c) => {
 // Health check
 app.get('/api/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
-const port = Number(process.env.PORT) || 3000;
+const port = Number(process.env.PORT) || 8080;
 
 serve({
     fetch: app.fetch,

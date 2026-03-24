@@ -163,6 +163,18 @@ jobs:
           done
           echo "Timed out waiting for environment."
           exit 1
+          
+      - name: Set Elastic Beanstalk environment variables
+        run: |
+          aws elasticbeanstalk update-environment \
+            --application-name "${{ vars.EB_APPLICATION_NAME }}" \
+            --environment-name "${{ vars.EB_ENVIRONMENT_NAME }}" \
+            --option-settings \
+              Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_ACCESS_KEY_ID,Value=${{ secrets.AWS_ACCESS_KEY_ID }} \
+        Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_SECRET_ACCESS_KEY,Value=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
+        Namespace=aws:elasticbeanstalk:application:environment,OptionName=AWS_REGION,Value=${{ vars.AWS_REGION }} \
+        Namespace=aws:elasticbeanstalk:application:environment,OptionName=SQS_QUEUE_URL,Value=${{ secrets.SQS_QUEUE_URL }} \
+        Namespace=aws:elasticbeanstalk:application:environment,OptionName=POLL_INTERVAL,Value=${{ vars.POLL_INTERVAL }}
 
       - name: Deploy to Elastic Beanstalk
         if: steps.eb_env.outputs.exists == 'true'

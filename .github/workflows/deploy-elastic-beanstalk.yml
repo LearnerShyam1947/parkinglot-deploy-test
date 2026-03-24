@@ -81,7 +81,7 @@ jobs:
           fi
 
       - name: Resolve Node.js solution stack (first deploy only)
-        if: steps.eb_secrets.outputs.exists == 'false'
+        if: steps.eb_env.outputs.exists == 'false'
         run: |
           set -euo pipefail
           if [ -n "${{ vars.EB_SOLUTION_STACK }}" ]; then
@@ -98,7 +98,7 @@ jobs:
           echo "EB_SOLUTION_STACK=$STACK" >> "$GITHUB_ENV"
 
       - name: Upload bundle and register application version (first deploy only)
-        if: steps.eb_secrets.outputs.exists == 'false'
+        if: steps.eb_env.outputs.exists == 'false'
         uses: einaregilsson/beanstalk-deploy@v22
         with:
           aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -112,7 +112,7 @@ jobs:
           wait_for_deployment: "false"
 
       - name: Create Elastic Beanstalk environment (first deploy only)
-        if: steps.eb_secrets.outputs.exists == 'false'
+        if: steps.eb_env.outputs.exists == 'false'
         run: |
           set -euo pipefail
           APP="${{ vars.EB_APPLICATION_NAME }}"
@@ -136,7 +136,7 @@ jobs:
             --option-settings file:///tmp/eb-create-opts.json
 
       - name: Wait for new environment (first deploy only)
-        if: steps.eb_secrets.outputs.exists == 'false'
+        if: steps.eb_env.outputs.exists == 'false'
         run: |
           set -euo pipefail
           ENV_NAME="${{ vars.EB_ENVIRONMENT_NAME }}"
@@ -166,7 +166,7 @@ jobs:
           exit 1
 
       - name: Deploy to Elastic Beanstalk
-        if: steps.eb_secrets.outputs.exists == 'true'
+        if: steps.eb_env.outputs.exists == 'true'
         uses: einaregilsson/beanstalk-deploy@v22
         with:
           aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}

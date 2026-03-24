@@ -147,12 +147,27 @@ jobs:
             --solution-stack-name "$EB_SOLUTION_STACK" \
             --option-settings file:///tmp/eb-create-opts.json
 
-      - name: Wait for new environment (first deploy only)
-        if: steps.eb_env.outputs.exists == 'false'
+          
+      - name: Deploy to Elastic Beanstalk
+        if: steps.eb_env.outputs.exists == 'true'
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          region: ${{ secrets.AWS_REGION }}
+          application_name: ${{ vars.EB_APPLICATION_NAME }}
+          environment_name: ${{ vars.EB_ENVIRONMENT_NAME }}
+          version_label: ${{ env.VERSION_LABEL }}
+          version_description: ${{ github.sha }}
+          deployment_package: deploy.zip
+          wait_for_deployment: "false"
+
+      - name: Wait for deployment to complete
         run: |
           set -euo pipefail
           ENV_NAME="${{ vars.EB_ENVIRONMENT_NAME }}"
 
+          echo "Waiting for environment $ENV_NAME to become Ready and Healthy..."
           for i in $(seq 1 120); do
             STATUS=$(aws elasticbeanstalk describe-environments \
               --environment-names "$ENV_NAME" \
@@ -164,16 +179,16 @@ jobs:
 
             echo "  [$i] Status=$STATUS Health=$HEALTH"
 
-            # If not yet created properly
+            # If not yet created properly or in transition
             if [ "$STATUS" = "None" ] || [ -z "$STATUS" ]; then
               sleep 15
               continue
             fi
 
-            # ✅ SUCCESS CONDITION (FIXED)
+            # ✅ SUCCESS CONDITION
             if [ "$STATUS" = "Ready" ]; then
               if [ "$HEALTH" = "Ok" ] || [ "$HEALTH" = "Warning" ]; then
-                echo "Environment is ready."
+                echo "Environment is ready and healthy."
                 exit 0
               fi
 
@@ -195,21 +210,6 @@ jobs:
 
           echo "Timed out waiting for environment."
           exit 1
-          
-      - name: Deploy to Elastic Beanstalk
-        if: steps.eb_env.outputs.exists == 'true'
-        uses: einaregilsson/beanstalk-deploy@v22
-        with:
-          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          region: ${{ secrets.AWS_REGION }}
-          application_name: ${{ vars.EB_APPLICATION_NAME }}
-          environment_name: ${{ vars.EB_ENVIRONMENT_NAME }}
-          version_label: ${{ env.VERSION_LABEL }}
-          version_description: ${{ github.sha }}
-          deployment_package: deploy.zip
-          wait_for_deployment: "true"
-          wait_for_environment_recovery: 120
 
       - name: Environment URL
         if: always() && steps.eb_env.outcome == 'success'

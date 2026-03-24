@@ -128,7 +128,7 @@ jobs:
           --arg aws_secret "${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
           --arg region "${{ vars.AWS_REGION }}" \
           --arg sqs "${{ secrets.SQS_QUEUE_URL }}" \
-          --arg poll "${{ vars.POLL_INTERVAL }}"
+          --arg poll "${{ vars.POLL_INTERVAL }}" \
           '[ 
             {"Namespace":"aws:autoscaling:launchconfiguration","OptionName":"IamInstanceProfile","Value":$profile},
             {"Namespace":"aws:elasticbeanstalk:environment","OptionName":"ServiceRole","Value":$role},

@@ -1,5 +1,4 @@
-const API_BASE = "http://44.204.99.2:8001/api/v1";
-const API_KEY = "key_eventpark";
+const API_BASE = "/api";
 
 document.addEventListener("DOMContentLoaded", async function () {
     // Dark theme toggle
@@ -23,12 +22,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         locationStatus.textContent = `📍 Showing events within ${radius / 1000}km of your location`;
 
         try {
-            const res = await fetch(`${API_BASE}/events/nearby?latitude=${latitude}&longitude=${longitude}&radius=${radius}&page=1&page_size=20`, {
-                headers: {
-                    'accept': 'application/json',
-                    'x-api-key': API_KEY
-                }
-            });
+            const res = await fetch(`${API_BASE}/events/nearby?latitude=${latitude}&longitude=${longitude}&radius=${radius}&page=1&page_size=20`);
             const data = await res.json();
             renderEvents(data.events);
         } catch (error) {
@@ -45,12 +39,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         const radius = 5000;
 
         try {
-            const res = await fetch(`${API_BASE}/events/nearby?latitude=${defaultLat}&longitude=${defaultLong}&radius=${radius}&page=1&page_size=20`, {
-                headers: {
-                    'accept': 'application/json',
-                    'x-api-key': API_KEY
-                }
-            });
+            const res = await fetch(`${API_BASE}/events/nearby?latitude=${defaultLat}&longitude=${defaultLong}&radius=${radius}&page=1&page_size=20`);
             const data = await res.json();
             renderEvents(data.events);
         } catch (error) {
